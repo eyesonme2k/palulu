@@ -1,0 +1,144 @@
+#include <windows.h>
+#include <iostream>
+#include <vector>
+#include <array>
+#include <chrono>
+#include <algorithm>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <memory>
+
+// Structure to hold color-key mappings
+struct ColorKeyMapping {
+    std::array<COLORREF, 3> colors;
+    std::string key;
+};
+
+// Vector to store all mappings
+std::vector<ColorKeyMapping> colorKeyMappings;
+
+// Function to load color-key mappings from a file
+void loadMappings(const std::string& filename) {
+    std::ifstream file(filename);
+    std::string line;
+    while (std::getline(file, line)) {
+        std::istringstream iss(line);
+        COLORREF c1, c2, c3;
+        std::string key;
+        if (iss >> std::hex >> c1 >> c2 >> c3 >> key) {
+            colorKeyMappings.push_back({ {c1, c2, c3}, key });
+        }
+    }
+}
+
+// Function to get screen colors efficiently
+std::array<COLORREF, 3> getScreenColors(int x1, int y1, int x2, int y2, int x3, int y3) {
+    HDC hdc = GetDC(NULL);
+    std::array<COLORREF, 3> colors = {
+        GetPixel(hdc, x1, y1),
+        GetPixel(hdc, x2, y2),
+        GetPixel(hdc, x3, y3)
+    };
+    ReleaseDC(NULL, hdc);
+    return colors;
+}
+
+// Function to simulate key press
+void pressKey(const std::string& key) {
+    INPUT input = { 0 };
+    input.type = INPUT_KEYBOARD;
+
+    if (key.length() == 1) {
+        // Single character key
+        input.ki.wVk = VkKeyScanA(key[0]);
+    }
+    else if (key.find("+") != std::string::npos) {
+        // Combination key
+        size_t plusPos = key.find("+");
+        std::string modifier = key.substr(0, plusPos);
+        char mainKey = key[plusPos + 1];
+
+        // Press modifier key
+        if (modifier == "CTRL") input.ki.wVk = VK_CONTROL;
+        else if (modifier == "SHIFT") input.ki.wVk = VK_SHIFT;
+        else if (modifier == "ALT") input.ki.wVk = VK_MENU;
+        SendInput(1, &input, sizeof(INPUT));
+
+        // Press main key
+        input.ki.wVk = VkKeyScanA(mainKey);
+        SendInput(1, &input, sizeof(INPUT));
+
+        // Release main key
+        input.ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput(1, &input, sizeof(INPUT));
+
+        // Release modifier key
+        input.ki.wVk = (modifier == "CTRL") ? VK_CONTROL : (modifier == "SHIFT") ? VK_SHIFT : VK_MENU;
+        SendInput(1, &input, sizeof(INPUT));
+
+        return;
+    }
+    else {
+        // Function keys or other special keys
+        if (key == "CAPSLOCK") input.ki.wVk = VK_CAPITAL;
+        else if (key.substr(0, 1) == "F" && key.length() <= 3) {
+            int fKeyNum = std::stoi(key.substr(1));
+            input.ki.wVk = VK_F1 + fKeyNum - 1;
+        }
+    }
+
+    SendInput(1, &input, sizeof(INPUT));
+    input.ki.dwFlags = KEYEVENTF_KEYUP;
+    SendInput(1, &input, sizeof(INPUT));
+}
+
+// Optimized color checking function
+void checkAndPressKeys(const std::array<COLORREF, 3>& screenColors) {
+    for (const auto& mapping : colorKeyMappings) {
+        if (screenColors == mapping.colors) {
+            pressKey(mapping.key);
+            // Uncomment the next line if you want to press only the first matching key
+            // break;
+        }
+    }
+}
+
+// Main loop function re-k
+void reK() {
+    auto lastCheck = std::chrono::steady_clock::now();
+    while (GetKeyState(VK_SCROLL) & 0x0001) {
+        auto now = std::chrono::steady_clock::now();
+        if (now - lastCheck >= std::chrono::milliseconds(800)) {  // Check every 800ms
+            auto colors = getScreenColors(100, 100, 200, 200, 300, 300);
+            checkAndPressKeys(colors);
+            lastCheck = now;
+        }
+        Sleep(1);  // Short sleep to reduce CPU usage
+    }
+}
+
+int main() {
+    // Load mappings from file
+    loadMappings("f:\\MAP.txt");
+
+    bool isOn = false;
+    while (true) {
+        bool currentState = GetKeyState(VK_SCROLL) & 0x0001;
+        if (currentState != isOn) {
+            isOn = currentState;
+            std::cout << (isOn ? "ON" : "OFF") << std::endl;
+
+            if (isOn) {
+                reK();
+            }
+        }
+        Sleep(100);  // Reduce CPU usage when checking state
+
+        // Release unused memory
+        std::vector<ColorKeyMapping>().swap(colorKeyMappings);
+        loadMappings("color_key_mappings.txt");
+    }
+    return 0;
+}
+
